@@ -54,25 +54,20 @@ schema <- function(pm) {
       nvalues = length(e$values))
   }
   s <- plyr::ldply(pm$schema$columns, extract_schema_row)
+  s$nvalues <- as.integer(s$nvalues)
   is.na(s$nvalues) <- (s$nvalues == 0)
   return(s)
 }
 
 # Converts a list, which may contain NULLs, to an atomic vector with the same
-# elements, replacing NULLs with NAs.  `to_mode` should be as.numeric,
-# as.character, or as.logical. `v` is a list. This function is useful for
+# elements, replacing NULLs with NAs.  `mode` should be "numeric",
+# "character", or "logical". `v` is a list. This function is useful for
 # converting from JSON arrays parsed by jsonlite.
-unlist_with_na <- function(v, to_mode) {
-  atomic <- try(to_mode(v), silent = TRUE)
-  if (class(atomic) == "try-error") {
-    # There must be NULLs in the vector. Do it the slow way.
-    convert <- function(e) {
-      if (is.null(e)) to_mode(NA) else to_mode(e)
-    }
-    return(vapply(v, convert, to_mode(NA)))
-  } else {
-    return(atomic)
-  }
+unlist_with_na <- function(v, mode) {
+  this_NA <- as.vector(NA, mode = mode)
+  v_is_null <- vapply(v, is.null, NA)
+  v_with_na <- ifelse(v_is_null, this_NA, v)
+  return(as.vector(v_with_na, mode = mode))
 }
 
 # Given a list structured as result_set.schema.json, returns a data frame with
@@ -95,16 +90,16 @@ result_set_to_data_frame <- function(rs, target, schema) {
     stopifnot(length(st) == 1)
     # Convert the list in the result set to a suitable atomic vector.
     if (st %in% c("realAdditive", "realMultiplicative")) {
-      table[[col_name]] <- unlist_with_na(rs$columns[[col_name]], as.numeric)
+      table[[col_name]] <- unlist_with_na(rs$columns[[col_name]], "numeric")
     } else if (st == "categorical") {
-      v <- unlist_with_na(rs$columns[[col_name]], as.character)
+      v <- unlist_with_na(rs$columns[[col_name]], "character")
       levels <- vapply(col_schema$values, function(e) e$value, "")
       table[[col_name]] <- factor(v, levels = levels)
     } else if (st == "sequence") {
       table[[col_name]] <- lapply(rs$columns[[col_name]],
-                                  function(x) unlist_with_na(x, as.numeric))
+                                  function(x) unlist_with_na(x, "numeric"))
     } else if (st == "void") {
-      table[[col_name]] <- unlist_with_na(rs$columns[[col_name]], as.character)
+      table[[col_name]] <- unlist_with_na(rs$columns[[col_name]], "character")
     } else {
       stop(sprintf("unsupported stat type '%s'", st))
     }
@@ -252,7 +247,7 @@ col_assoc <- function(
   # `elems` is a row-major lower-triangular matrix, as specified in
   # association_matrix.schema.json. Use it to fill in the regular association
   # matrix `a`.
-  elems <- unlist_with_na(httr::content(resp)$elements, as.numeric)
+  elems <- unlist_with_na(httr::content(resp)$elements, "numeric")
   a <- matrix(nrow = length(target), ncol = length(target),
               dimnames = list(target, target))
   for (i in seq_along(target)) {

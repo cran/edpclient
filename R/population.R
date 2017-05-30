@@ -29,3 +29,8 @@ popmods.edp_population <- function(x) {
   pms <- popmods(x$sess)
   pms[pms$id %in% x$pmids, ]
 }
+
+delete_population <- function(pop) {
+  stopifnot(is.population(pop))
+  edp_delete(pop$sess, paste("rpc/population", URLencode(pop$pid), sep = "/"))
+}

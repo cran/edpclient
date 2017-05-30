@@ -1,8 +1,13 @@
 # Map an EDP resource URL to its id. See test_id_from_url for examples.
 id_from_url <- function(url, expected_prefix) {
   parts <- strsplit(url, "/")[[1]]
+  if (parts[[1]] != "https:") {
+    stop("'", url, "' does not look like a URL")
+  }
   id <- parts[length(parts)]
-  stopifnot(startsWith(id, expected_prefix))
+  if (!startsWith(id, expected_prefix)) {
+    stop("'", id, "' does not start with '", expected_prefix, "'")
+  }
   return(id)
 }
 

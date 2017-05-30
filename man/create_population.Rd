@@ -24,8 +24,8 @@ create_population(sess, data, name)
 }
 \seealso{
   \code{\link{edp_session}}, \code{\link{population}},
-  \code{\link{stat_type}}, \code{\link{display_name}},
-  \code{\link{identifying}}
+  \code{\link{delete_population}}, \code{\link{stat_type}},
+  \code{\link{display_name}}, \code{\link{identifying}}
 }
 \examples{
   d <- data.frame(x = c(1, 2, 3, 4, 5))

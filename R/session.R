@@ -9,9 +9,8 @@ debug_message <- function(...) {
 stop_if_unsuccessful <- function(httr_response, http_method, url) {
   code <- httr::status_code(httr_response)
   if (!(200 <= code && code < 300)) {
-    stop(sprintf("HTTP status %d from %s %s [%s]", code, http_method, url,
-                 httr::content(httr_response, as = "text")),
-         call. = FALSE)
+    stop("HTTP status ", code, " from ", http_method, " ", url, " [",
+         httr::content(httr_response, as = "text"), "]", call. = FALSE)
   }
 }
 
@@ -27,18 +26,30 @@ edp_get <- function(sess, op) {
   return(resp)
 }
 
-# POSTs `body`, which should be convertible to JSON, to <edp_base_url>/<op>
-# with a JWT and returns the httr response.
-edp_post <- function(sess, op, body) {
+# POSTs (or uses `verb` if specified) to the EDP-relative URL `op` with a JWT.
+# `body` is sent as the POST body; it should be convertible to JSON. Returns
+# the httr response.
+edp_post <- function(sess, op, body, verb = "POST") {
   url <- paste(sess$edp_url, op, sep = "/")
-  debug_message("POST", url, jsonlite::toJSON(body, auto_unbox = TRUE))
+  debug_message(verb, url, jsonlite::toJSON(body, auto_unbox = TRUE))
   bearer <- paste("Bearer", sess$bearer_token, sep = " ")
-  resp <- httr::POST(url, body = body, encode = "json",
+  resp <- httr::VERB(verb, url, body = body, encode = "json",
                      httr::add_headers("Authorization" = bearer))
-  debug_message("POST response", httr::status_code(resp),
+  debug_message(verb, "response", httr::status_code(resp),
                 httr::content(resp, "text", encoding = "UTF-8"))
-  stop_if_unsuccessful(resp, "POST", url)
+  stop_if_unsuccessful(resp, verb, url)
   return(resp)
+}
+
+# DELETEs <edp_base_url>/<op>, authenticating with a JWT.
+edp_delete <- function(sess, op) {
+  url <- paste(sess$edp_url, op, sep = "/")
+  debug_message("DELETE", url)
+  bearer <- paste("Bearer", sess$bearer_token, sep = " ")
+  resp <- httr::DELETE(url, httr::add_headers("Authorization" = bearer))
+  debug_message("DELETE response", httr::status_code(resp),
+                httr::content(resp, "text", encoding = "UTF-8"))
+  stop_if_unsuccessful(resp, "DELETE", url)
 }
 
 format_utc_time <- function(seconds) {
