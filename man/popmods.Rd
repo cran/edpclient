@@ -1,17 +1,16 @@
 \name{popmods}
 \alias{popmods}
 \title{List population models}
-\description{Lists population models as a data frame}
+\description{Lists population models from a population as a data frame}
 \usage{
-popmods(x)
+popmods(pop)
 }
 \arguments{
-  \item{x}{an \code{edp_session} object from \code{edp_session()} or a
-      \code{population} object from \code{population()}}
+  \item{pop}{a \code{population} object from \code{population()}}
 }
 
 \value{
-  a data frame with column names "name", "id", "parent_id", "creation_date",
+  a data frame with column names "name", "id", "creation_date",
   and "build_status"
 }
 

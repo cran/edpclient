@@ -1,13 +1,13 @@
 \name{select}
 \alias{select}
-\title{Fetch columns from a population model}
-\description{Fetch specified columns from a population model. This is the data
-the population model is trained on.}
+\title{Fetch columns from a population or population model}
+\description{Fetch specified columns from a population or population model.}
 \usage{
-select(pm, target = NULL, where = NULL, rowids = NULL)
+select(x, target = NULL, where = NULL, rowids = NULL)
 }
 \arguments{
-  \item{pm}{an EDP population model, from \code{popmod(...)}}
+  \item{x}{an EDP population from \code{population(...)} or an EDP population
+      model from \code{popmod(...)}}
   \item{target}{a character vector of column names, defaults to
       \code{names(pm)} minus \code{names(where)}}
   \item{where}{a list of conditions to select on; \code{list(a = "x", c = 3)}

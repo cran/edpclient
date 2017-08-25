@@ -31,10 +31,13 @@ edp_get <- function(sess, op) {
 # the httr response.
 edp_post <- function(sess, op, body, verb = "POST") {
   url <- paste(sess$edp_url, op, sep = "/")
-  debug_message(verb, url, jsonlite::toJSON(body, auto_unbox = TRUE))
+  encoded_body <- jsonlite::toJSON(body, auto_unbox = TRUE, na = "null",
+                                   dataframe = "column")
+  debug_message(verb, url, encoded_body)
   bearer <- paste("Bearer", sess$bearer_token, sep = " ")
-  resp <- httr::VERB(verb, url, body = body, encode = "json",
-                     httr::add_headers("Authorization" = bearer))
+  resp <- httr::VERB(verb, url, body = encoded_body, encode = "raw",
+                     httr::add_headers("Content-Type" = "application/json",
+                                       "Authorization" = bearer))
   debug_message(verb, "response", httr::status_code(resp),
                 httr::content(resp, "text", encoding = "UTF-8"))
   stop_if_unsuccessful(resp, verb, url)
@@ -77,22 +80,6 @@ print.edp_session <- function(x, ...) {
 
 is.edp_session <- function(x) {
   return(class(x) == "edp_session")
-}
-
-popmods <- function(x) UseMethod("popmods", x)
-
-# Exported; see ?edpclient::popmods.
-popmods.edp_session <- function(x) {
-  resp <- httr::content(edp_get(x, "rpc/population_model"))
-  # `resp` is a list of #/definitions/population_model in edp.schema.json.
-  plyr::ldply(resp, function(pm) data.frame(
-      stringsAsFactors = FALSE,
-      name = pm$name,
-      id = pm$id,
-      parent_id = ifelse(is.null(pm$parent_id), as.character(NA),
-                         pm$parent_id),
-      creation_time = format_utc_time(pm$creation_time),
-      build_status = pm$build_progress$status))
 }
 
 populations <- function(sess) {

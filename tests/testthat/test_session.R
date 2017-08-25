@@ -2,9 +2,6 @@ test_that("basic edp_session operations work", {
   skip_on_cran()
   expect_true(is.edp_session(SESS))
   print(SESS)
-  pms <- popmods(SESS)
-  print(pms)
-  expect_gt(nrow(pms), 1)
 })
 
 test_that("we can work with population models", {
@@ -30,6 +27,10 @@ test_that("we can select from yaxcatpeople", {
   expect_s3_class(d$FUELHEAT, "factor")
   expect_equal(display_name(d$FUELHEAT), "Home heating fuel")
   expect_equal(stat_type(d$FUELHEAT), "categorical")
+  # Check that the result is the same if we select from the parent population.
+  parent_pop <- population(SESS, pm$parent_id)
+  d_pop <- select(parent_pop, target = c("FUELHEAT"))
+  expect_equal(d, d_pop)
   # Check that we can select a subset of rows.
   d <- select(pm, "FUELHEAT", where = list(CARPOOL = "1"))
   expect_equal(dim(d), c(359, 1))
@@ -64,7 +65,8 @@ test_that("we can simulate from yaxcatpeople", {
   d <- simulate(pm, nsim = 1)
   expect_equal(dim(d), c(1, 246))
   # Check that we can simulate conditionally.
-  d <- simulate(pm, target = "FUELHEAT", given = list(CARPOOL = "1"), nsim = 10)
+  d <- simulate(pm, target = "FUELHEAT", given = data.frame(CARPOOL = "1"),
+                nsim = 10)
   expect_equal(nrow(d), 10)
 })
 

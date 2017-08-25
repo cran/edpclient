@@ -15,8 +15,9 @@ the population model is trained on.}
   \item{target}{a character vector of column names, defaults to
       \code{names(pm)}}
   \item{columns}{alias for \code{target} for compatibility with \code{simulate}}
-  \item{given}{a list of values to condition on; \code{list(a = 3)}
-      means to simulate from the conditional distribution given \code{a} is 3.}
+  \item{given}{a single-row data frame of values to condition on;
+      \code{data.frame(a = 3)} means to simulate from the conditional
+      distribution given \code{a} is 3.}
 }
 \value{
   a data frame with the columns specified in \code{target}.

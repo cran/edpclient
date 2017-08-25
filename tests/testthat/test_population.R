@@ -14,6 +14,7 @@ test_that("population object utilities work", {
   expect_false(is.population("not a population"))
   expect_equal(as.character(p), GSS3_PID)
   expect_equal(p$name, "gss3")
+  print(p)
 })
 
 test_that("population model object utilities work", {
@@ -26,6 +27,7 @@ test_that("population model object utilities work", {
   expect_equal(pm$id, GSS3_PMID)
   expect_equal(pm$parent_id, GSS3_PID)
   expect_equal(pm$build_status, "built")
+  print(pm)
 })
 
 test_that("population models on a population can be listed", {
@@ -34,4 +36,11 @@ test_that("population models on a population can be listed", {
   expect_gte(nrow(pms), 3)
   expect_true(all(pms$parent_id == GSS3_PID))
   expect_true(all(startsWith(pms$id, "pm-")))
+})
+
+test_that("we can find the latest population model", {
+  skip_on_cran()
+  pm <- latest_popmod(population(SESS, GSS3_PID))
+  expect_true(is.popmod(pm))
+  expect_equal(pm$id, GSS3_PMID)
 })

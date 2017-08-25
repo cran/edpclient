@@ -116,17 +116,18 @@ result_set_to_data_frame <- function(rs, target, schema) {
 }
 
 # Exported; see ?edpclient::select.
-select <- function(pm, target = NULL, where = NULL, rowids = NULL) {
-  stopifnot(is.popmod(pm))
-  op <- paste("rpc/population_model", utils::URLencode(pm$id), "select",
+select.edp_population_model <- function(x, target = NULL, where = NULL,
+                                        rowids = NULL) {
+  stopifnot(is.popmod(x))
+  op <- paste("rpc/population_model", utils::URLencode(x$id), "select",
               sep = "/")
   if (is.null(target)) {
-    target <- Filter(function(x) !(x %in% names(where)), names(pm))
+    target <- Filter(function(n) !(n %in% names(where)), names(x))
   }
-  if (!all(target %in% names(pm))) {
+  if (!all(target %in% names(x))) {
     stop("Not all target columns are in population model.")
   }
-  if (!all(names(where) %in% names(pm))) {
+  if (!all(names(where) %in% names(x))) {
     stop("Not all where columns are in population model.")
   }
   if (!is.null(rowids) && !is.numeric(rowids)) {
@@ -136,9 +137,15 @@ select <- function(pm, target = NULL, where = NULL, rowids = NULL) {
     stop("At most one of `rowids` and `where` may be set.")
   }
   # TODO(madeleine): Check that the where values are the right type?
-  req <- list(target = as.list(target), where = where, rowids = rowids)
-  resp <- httr::content(edp_post(pm$sess, op, req))
-  return(result_set_to_data_frame(resp, target, pm$schema))
+  req <- list(target = as.list(target))
+  if (!is.null(where)) {
+    req[["where"]] <- where
+  }
+  if (!is.null(rowids)) {
+    req[["rowids"]] <- rowids
+  }
+  resp <- httr::content(edp_post(x$sess, op, req))
+  return(result_set_to_data_frame(resp, target, x$schema))
 }
 
 # Exported; see ?edpclient::simulate.edp_population_model.
@@ -157,7 +164,15 @@ simulate.edp_population_model <- function(object, nsim = 1, seed = NULL, ...,
   if (!all(names(given) %in% names(pm))) {
     stop("Not all given columns are in population model.")
   }
-  op <- paste("rpc/population_model", utils::URLencode(pm$id), "simulate_row",
+  if (!is.null(given)) {
+    if (!is.data.frame(given)) {
+      stop("`given` must be NULL or a data frame")
+    }
+    if (nrow(given) != 1) {
+      stop("`given`, if set, must have one row")
+    }
+  }
+  op <- paste("rpc/population_model", utils::URLencode(pm$id), "simulate",
               sep = "/")
   req <- list(target = as.list(target), n = nsim)
   if (!is.null(seed)) {
@@ -167,7 +182,8 @@ simulate.edp_population_model <- function(object, nsim = 1, seed = NULL, ...,
     req$given <- given
   }
   resp <- httr::content(edp_post(pm$sess, op, req))
-  return(result_set_to_data_frame(resp, target, pm$schema))
+  stopifnot(length(resp) == 1)
+  return(result_set_to_data_frame(resp[[1]], target, pm$schema))
 }
 
 # Exported; see ?edpclient::predict.edp_population_model.
@@ -228,7 +244,7 @@ col_assoc <- function(
     statistic = c("mutual information", "R squared", "classic dep prob")) {
   statistic <- match.arg(statistic)
   op <- paste("rpc/population_model", utils::URLencode(pm$id),
-              "column_association", sep = "/")
+              "relation", sep = "/")
   if (is.null(target)) {
     target <- modeled_names(pm)
     if (!is.null(given)) {
@@ -242,8 +258,9 @@ col_assoc <- function(
     stop("Can't compute association of givens.")
   }
   resp <- edp_post(pm$sess, op,
-                   list(target = as.list(target), given = given,
-                        statistic = statistic))
+                   list(response_columns = as.list(target),
+                        predictor_columns = as.list(target),
+                        given = given, statistic = statistic))
   # `elems` is a row-major lower-triangular matrix, as specified in
   # association_matrix.schema.json. Use it to fill in the regular association
   # matrix `a`.
