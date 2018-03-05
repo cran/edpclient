@@ -70,7 +70,7 @@ edp_session <- function(profile = "default") {
   }
   class(config) <- "edp_session"
   # Make sure our JWT works.
-  edp_get(config, "auth/username")
+  config$username <- httr::content(edp_get(config, "auth/username"))
   return(config)
 }
 

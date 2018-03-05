@@ -46,11 +46,35 @@ data_frame_to_json <- function(data) {
   # Iterate over columns in `data` and add them to `j` and `s`.
   for (name in names(data)) {
     schema_column <- list(name = name)  # to add to `s`
-    if (identifying(data[[name]]) || all(is.na(data[[name]]))) {
+    if (identifying(data[[name]]) || all(is.na(data[[name]])) ||
+        isTRUE(stat_type(data[[name]]) == "void")) {
       schema_column[["stat_type"]] <- "void"
       values <- as.list(as.character(data[[name]]))
+    } else if (methods::is(data[[name]], "POSIXt")) {
+      lt <- as.POSIXlt(data[[name]])
+      if (any(lt$sec != 0 | lt$min != 0 | lt$hour != 0)) {
+        # Values specified to greater than day precision. We can't model these
+        # yet.
+        schema_column[["stat_type"]] <- "void"
+        values <- as.list(as.character(data[[name]]))
+      } else {
+        schema_column[["stat_type"]] <- "date"
+        epoch <- as.POSIXlt("1970-01-01 UTC")
+        days <- difftime(data[[name]], epoch, units = "days")
+        values <- as.list(as.integer(days))
+      }
     } else if (is.numeric(data[[name]])) {
       schema_column[["stat_type"]] <- guess_numeric_stat_type(data[[name]])
+      if (!is.null(precision(data[[name]]))) {
+        schema_column[["precision"]] <- precision(data[[name]])
+      } else {
+        # Guessing precision is limited to setting the precision to 1/1 if all
+        # values are integers with absolute value smaller than 1000.
+        v <- as.vector(na.omit(data[[name]]))
+        if (all(round(v) == v) && all(abs(v) < 1000)) {
+          schema_column[["precision"]] <- c(1, 1)
+        }
+      }
       # https://github.com/jeroenooms/jsonlite/issues/169
       # If it weren't for that, we could just write `values <- data[[name]]`.
       # Note that class(NA) == "logical". This doesn't work for real NA_real_.
@@ -61,8 +85,12 @@ data_frame_to_json <- function(data) {
                                         list(value = "TRUE"))
       values <- as.list(as.character(data[[name]]))
     } else if (is.factor(data[[name]])) {
-      # Support orderedCategorical, too?
-      schema_column[["stat_type"]] <- "categorical"
+      nvalues <- length(levels(data[[name]]))
+      if (nvalues > 100) {
+        stop("column ", name, " has ", nvalues, " values.")
+      }
+      schema_column[["stat_type"]] <-
+          ifelse(is.ordered(data[[name]]), "orderedCategorical", "categorical")
       schema_column[["values"]] <- lapply(levels(data[[name]]),
                                           function(x) list(value = x))
       values <- as.list(as.character(data[[name]]))
@@ -77,6 +105,10 @@ data_frame_to_json <- function(data) {
     dn <- display_name(data[[name]])
     if (!is.na(dn)) {
       schema_column[["display_name"]] <- dn
+    }
+    desc <- attr(data[[name]], "description")
+    if (!is.null(desc)) {
+      schema_column[["description"]] <- desc
     }
     s[["columns"]] <- append(s[["columns"]], list(schema_column))
     j[["columns"]][[name]] <- values

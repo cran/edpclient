@@ -2,8 +2,8 @@
 # properties of data frames used for creating populations and returned from
 # select and simulate.
 
-ALL_STAT_TYPES <- c("void", "realAdditive", "realMultiplicative", "proportion",
-                    "categorical", "unboundedCount", "sequence")
+ALL_STAT_TYPES <- c("void", "realAdditive", "realMultiplicative", "magnitude",
+                    "categorical", "orderedCategorical", "date")
 
 identifying <- function(col) {
   isTRUE(attr(col, "identifying"))
@@ -63,7 +63,30 @@ stat_type <- function(col) {
 }
 
 `stat_type<-` <- function(col, value) {
-  stopifnot(length(value) == 1 && value %in% ALL_STAT_TYPES)
+  if (length(value) != 1) {
+    stop("stat_type must be a single-element character vector")
+  }
+  if (!(value %in% ALL_STAT_TYPES)) {
+    stop("cannot set stat_type to '", value,  "'; it must be one of (",
+         paste(ALL_STAT_TYPES, collapse = ", "), ")")
+  }
   attr(col, "stat_types") <- value
   return(col)
+}
+
+precision <- function(col) {
+  attr(col, "precision")
+}
+
+`precision<-` <- function(col, value) {
+  if (is.null(value)) {
+    attr(col, "precision") <- NULL
+    return(col)
+  } else {
+    # `value` must be two positive integers, at least one of which is one.
+    stopifnot(is.numeric(value) && length(value) == 2 && all(value > 0) &&
+              sum(value == 1) >= 1 && all(round(value) == value))
+    attr(col, "precision") <- value
+    return(col)
+  }
 }

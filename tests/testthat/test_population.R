@@ -14,6 +14,8 @@ test_that("population object utilities work", {
   expect_false(is.population("not a population"))
   expect_equal(as.character(p), GSS3_PID)
   expect_equal(p$name, "gss3")
+  expect_length(names(p), 48)
+  expect_true("babies" %in% names(p))
   print(p)
 })
 

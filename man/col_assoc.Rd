@@ -5,7 +5,8 @@
     information) of a collection of columns.}
 \usage{
 col_assoc(pm, target = NULL, given = NULL,
-          statistic = c("mutual information", "R squared", "classic dep prob"))
+          statistic = c("mutual information", "R squared", "classic dep prob"),
+          seed = NULL)
 }
 \arguments{
   \item{pm}{an edp_population_model object, from \code{popmod}}
@@ -13,6 +14,7 @@ col_assoc(pm, target = NULL, given = NULL,
   \item{given}{a list of values to condition on; \code{list(a = 3)}
       means to compute the association conditional on \code{a} being 3.}
   \item{statistic}{the name of the statistic to compute}
+  \item{seed}{if set, an integer to pass to EDP as a random seed for this call}
 }
 \value{
 a square matrix of column associations, where the edge length is

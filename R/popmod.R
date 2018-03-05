@@ -21,20 +21,30 @@ modeled_names <- function(pm) {
   return(vapply(s, function(e) e$name, ""))
 }
 
+# Returns the schema JSON for population `pid`.
+schema_json <- function(sess, pid) {
+  stopifnot(is.edp_session(sess))
+  stopifnot(is.character(pid) && startsWith(pid, "p-"))
+  op <- paste("rpc/population", utils::URLencode(pid), "schema",
+              sep = "/")
+  schema <- try(httr::content(edp_get(sess, op)), silent = TRUE)
+  if (class(schema) == "try-error") {
+    stop(sprintf("Could not load schema for population '%s'.", pid))
+  }
+  schema
+}
+
 # Exported; see ?edpclient::popmod.
 popmod <- function(sess, pmid) {
   # `pm_resp` is a #/definitions/population_model in edp.schema.json.
   op <- paste("rpc/population_model", utils::URLencode(pmid), sep = "/")
-  pm_resp <- httr::content(edp_get(sess, op))
-
-  op <- paste("rpc/population", utils::URLencode(pm_resp$parent_id), "schema",
-              sep = "/")
-  schema <- try(httr::content(edp_get(sess, op)), silent = TRUE)
-  if (class(schema) == "try-error") {
-    stop(sprintf("Could not find population model '%s'", pmid))
+  pm_resp <- try(httr::content(edp_get(sess, op)), silent = TRUE)
+  if (class(pm_resp) == "try-error") {
+    stop(sprintf("Could not load population model for '%s'.", pmid))
   }
   pm <- list(sess = sess, id = pmid, name = pm_resp$name,
-             parent_id = pm_resp$parent_id, schema = schema,
+             parent_id = pm_resp$parent_id,
+             schema = schema_json(sess, pm_resp$parent_id),
              build_status = pm_resp$build_progress$status)
   class(pm) <- "edp_population_model"
   return(pm)
@@ -44,8 +54,7 @@ is.popmod <- function(x) {
   "edp_population_model" %in% class(x)
 }
 
-# Exported; see ?edpclient::schema.
-schema <- function(pm) {
+schema_data_frame_from_json <- function(j) {
   extract_schema_row <- function(e) {
     c(name = e$name,
       display_name = ifelse(is.null(e$display_name), as.character(NA),
@@ -53,10 +62,24 @@ schema <- function(pm) {
       stat_type = e$stat_type,
       nvalues = length(e$values))
   }
-  s <- plyr::ldply(pm$schema$columns, extract_schema_row)
+  s <- plyr::ldply(j$columns, extract_schema_row)
   s$nvalues <- as.integer(s$nvalues)
   is.na(s$nvalues) <- (s$nvalues == 0)
   return(s)
+}
+
+schema <- function(x) {
+  UseMethod("schema", x)
+}
+
+schema.edp_population <- function(x) {
+  # This makes a network call every time it's called, but the population model
+  # one doesn't. This is a little weird.
+  schema_data_frame_from_json(schema_json(x$sess, x$pid))
+}
+
+schema.edp_population_model <- function(x) {
+  schema_data_frame_from_json(x$schema)
 }
 
 # Converts a list, which may contain NULLs, to an atomic vector with the same
@@ -91,13 +114,17 @@ result_set_to_data_frame <- function(rs, target, schema) {
     # Convert the list in the result set to a suitable atomic vector.
     if (st %in% c("realAdditive", "realMultiplicative")) {
       table[[col_name]] <- unlist_with_na(rs$columns[[col_name]], "numeric")
-    } else if (st == "categorical") {
+    } else if (st %in% c("categorical", "orderedCategorical")) {
       v <- unlist_with_na(rs$columns[[col_name]], "character")
       levels <- vapply(col_schema$values, function(e) e$value, "")
-      table[[col_name]] <- factor(v, levels = levels)
-    } else if (st == "sequence") {
-      table[[col_name]] <- lapply(rs$columns[[col_name]],
-                                  function(x) unlist_with_na(x, "numeric"))
+      table[[col_name]] <- factor(v, levels = levels,
+                                  ordered = (st == "orderedCategorical"))
+    } else if (st == "date") {
+      days <- unlist_with_na(rs$columns[[col_name]], "integer")
+      # Round because we can't get exactly the right difftime due to DST.
+      table[[col_name]] <- round.POSIXt(
+          as.POSIXlt("1970-01-01 UTC") + as.difftime(days, units = "days"),
+          units = "days")
     } else if (st == "void") {
       table[[col_name]] <- unlist_with_na(rs$columns[[col_name]], "character")
     } else {
@@ -115,75 +142,77 @@ result_set_to_data_frame <- function(rs, target, schema) {
   return(table)
 }
 
-# Exported; see ?edpclient::select.
 select.edp_population_model <- function(x, target = NULL, where = NULL,
                                         rowids = NULL) {
-  stopifnot(is.popmod(x))
-  op <- paste("rpc/population_model", utils::URLencode(x$id), "select",
-              sep = "/")
+  select(population(x$sess, x$parent_id),
+         target = target, where = where, rowids = rowids)
+}
+
+make_simulate_req <- function(pm, nsim, seed, target, given) {
+  stopifnot(is.null(seed) || is.numeric(seed))
   if (is.null(target)) {
-    target <- Filter(function(n) !(n %in% names(where)), names(x))
+    target <- modeled_names(pm)
   }
-  if (!all(target %in% names(x))) {
-    stop("Not all target columns are in population model.")
+  for (g in names(given)) {
+    if (!(g %in% modeled_names(pm))) {
+      stop(sprintf("Given column '%s' is not modeled.", g))
+    }
   }
-  if (!all(names(where) %in% names(x))) {
-    stop("Not all where columns are in population model.")
+  if (!is.null(given)) {
+    if (!is.data.frame(given)) {
+      stop("`given` must be NULL or a data frame.")
+    }
+    if (nrow(given) != 1) {
+      stop("`given`, if set, must have one row.")
+    }
   }
-  if (!is.null(rowids) && !is.numeric(rowids)) {
-    stop("Invalid rowids.")
+  req <- list(target = as.list(target), n = nsim)
+  if (!is.null(seed)) {
+    req$random_seed <- as.integer(seed)  # seed could be a non-integer number
   }
-  if (!is.null(rowids) && !is.null(where)) {
-    stop("At most one of `rowids` and `where` may be set.")
+  if (!is.null(given)) {
+    req$given <- given
   }
-  # TODO(madeleine): Check that the where values are the right type?
-  req <- list(target = as.list(target))
-  if (!is.null(where)) {
-    req[["where"]] <- where
+  return(req)
+}
+
+make_simulate_by_model_result <- function(schema, target, resp) {
+  # simulate-by-model returns one result set per model. Turn them into data
+  # frames with a `model` attribute and stack them.
+  model_data_frames <- list()
+  for (i in 1:length(resp)) {
+    stopifnot(length(resp[[i]]) == 1)  # zero or one given row
+    d <- result_set_to_data_frame(resp[[i]][[1]], target, schema)
+    d$model <- i
+    model_data_frames[[i]] <- d
   }
-  if (!is.null(rowids)) {
-    req[["rowids"]] <- rowids
-  }
-  resp <- httr::content(edp_post(x$sess, op, req))
-  return(result_set_to_data_frame(resp, target, x$schema))
+  all_data <- do.call(rbind, model_data_frames)
+  all_data$model <- as.factor(all_data$model)  # not ordered
+  return(all_data)
 }
 
 # Exported; see ?edpclient::simulate.edp_population_model.
 simulate.edp_population_model <- function(object, nsim = 1, seed = NULL, ...,
                                           target = NULL, columns = NULL,
-                                          given = NULL) {
-  stopifnot(is.null(seed) || is.numeric(seed))
+                                          given = NULL, by_model = FALSE) {
   pm <- object  # Give the standard argument a better name.
   # `columns` is the R-idiomatic name. `target` is the EDP-idiomatic name.
   if (is.null(target) && !is.null(columns)) {
     target <- columns
   }
-  if (is.null(target)) {
-    target <- modeled_names(pm)
-  }
-  if (!all(names(given) %in% names(pm))) {
-    stop("Not all given columns are in population model.")
-  }
-  if (!is.null(given)) {
-    if (!is.data.frame(given)) {
-      stop("`given` must be NULL or a data frame")
-    }
-    if (nrow(given) != 1) {
-      stop("`given`, if set, must have one row")
-    }
-  }
-  op <- paste("rpc/population_model", utils::URLencode(pm$id), "simulate",
-              sep = "/")
-  req <- list(target = as.list(target), n = nsim)
-  if (!is.null(seed)) {
-    req$seed <- as.integer(seed)  # seed could be a non-integer number
-  }
-  if (!is.null(given)) {
-    req$given <- given
-  }
+  req <- make_simulate_req(pm, nsim, seed, target, given)
+  target <- as.character(req$target)  # i.e. not a `list`
+  op <- paste("rpc/population_model", utils::URLencode(pm$id),
+              ifelse(by_model, "simulate_by_model", "simulate"), sep = "/")
   resp <- httr::content(edp_post(pm$sess, op, req))
-  stopifnot(length(resp) == 1)
-  return(result_set_to_data_frame(resp[[1]], target, pm$schema))
+  if (by_model) {
+    return(make_simulate_by_model_result(pm$schema, target, resp))
+  } else {
+    # simulate not-by-model returns one result set per given, and we passed at
+    # most one given.
+    stopifnot(length(resp) == 1)
+    return(result_set_to_data_frame(resp[[1]], target, pm$schema))
+  }
 }
 
 # Exported; see ?edpclient::predict.edp_population_model.
@@ -211,6 +240,20 @@ predict.edp_population_model <- function(object, ...,
   resp <- httr::content(edp_post(pm$sess, op, req))
   # TODO(asilvers): This is ignoring the inferred confidence.
   return(result_set_to_data_frame(resp, target, pm$schema))
+}
+
+joint_probability <- function(pm, target, log = FALSE) {
+  stopifnot(is.popmod(pm))
+  stopifnot(is.data.frame(target))
+  op <- paste("rpc/population_model", utils::URLencode(pm$id), "logpdf_rows",
+              sep = "/")
+  resp <- edp_post(pm$sess, op, list(targets = target))
+  lp <- as.numeric(httr::content(resp))
+  if (log) {
+    return(lp)
+  } else {
+    return(exp(lp))
+  }
 }
 
 # Returns element (i, j) of the lower-triangular matrix defined by the
@@ -241,8 +284,10 @@ get_lower_tri_elem <- function(elems, i, j) {
 # Exported; see ?edpclient::col_assoc.
 col_assoc <- function(
     pm, target = NULL, given = NULL,
-    statistic = c("mutual information", "R squared", "classic dep prob")) {
+    statistic = c("mutual information", "R squared", "classic dep prob"),
+    seed = NULL) {
   statistic <- match.arg(statistic)
+  stopifnot(is.null(seed) || is.numeric(seed))
   op <- paste("rpc/population_model", utils::URLencode(pm$id),
               "relation", sep = "/")
   if (is.null(target)) {
@@ -257,10 +302,13 @@ col_assoc <- function(
   if (any(names(given) %in% target)) {
     stop("Can't compute association of givens.")
   }
-  resp <- edp_post(pm$sess, op,
-                   list(response_columns = as.list(target),
-                        predictor_columns = as.list(target),
-                        given = given, statistic = statistic))
+  req <- list(response_columns = as.list(target),
+              predictor_columns = as.list(target),
+              given = given, statistic = statistic)
+  if (!is.null(seed)) {
+    req$random_seed <- as.integer(seed)
+  }
+  resp <- edp_post(pm$sess, op, req)
   # `elems` is a row-major lower-triangular matrix, as specified in
   # association_matrix.schema.json. Use it to fill in the regular association
   # matrix `a`.
@@ -276,7 +324,7 @@ col_assoc <- function(
   return(a)
 }
 
-build_popmod <- function(pop, name, models = 16, builder = "crosscat",
+build_popmod <- function(pop, name, models = 16, builder = "lazy",
                          iterations = 10) {
   stopifnot(is.population(pop))
   stopifnot(is.character(name) && !is.na(name[1]) && length(name) == 1)
@@ -326,6 +374,8 @@ wait_noisily <- function(pm) {
     if (prog$status %in%
         c("inconsistent", "built", "canceled", "cancel_requested", "failed")) {
       pm$build_status <- prog$status
+      message(paste(pm$sess$edp_url, "explorer", "explain",
+              utils::URLencode(pm$id), sep = "/"))
       return(pm)
     } else if (prog$status == "unbuilt") {
       if (!not_started_message_printed) {
@@ -365,7 +415,7 @@ wait_for <- function(pm, quiet = FALSE, seconds = Inf) {
     pm <- wait_quietly(pm, seconds)
   } else {
     if (seconds != Inf) {
-      stop("`seconds` is not compatible with `quiet = FALSE`")
+      stop("`seconds` is not compatible with `quiet = FALSE`.")
     }
     pm <- wait_noisily(pm)
   }

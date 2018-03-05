@@ -19,6 +19,14 @@ test_that("we can work with population models", {
   expect_equal(h$nvalues, 6)
 })
 
+test_that("model and population schemas are the same", {
+  skip_on_cran()
+  pm <- popmod(SESS, YAXCATPEOPLE_PMID)
+  pop_schema <- schema(population(SESS, pm$parent_id))
+  pm_schema <- schema(pm)
+  expect_equal(pop_schema, pm_schema)
+})
+
 test_that("we can select from yaxcatpeople", {
   skip_on_cran()
   pm <- popmod(SESS, YAXCATPEOPLE_PMID)
@@ -36,9 +44,9 @@ test_that("we can select from yaxcatpeople", {
   expect_equal(dim(d), c(359, 1))
   # Check that we detect bad column names in `target` and `where`.
   expect_error(select(pm, "does not exist"),
-               "Not all target columns are in population model")
+               "Not all target columns are in population")
   expect_error(select(pm, "FUELHEAT", where = list(`does not exist` = 0)),
-               "Not all where columns are in population model")
+               "Not all where columns are in population")
   # Check that we can select all 271 columns, including unmodeled ones.
   d <- select(pm)
   expect_equal(dim(d), c(1000, 271))
@@ -70,6 +78,29 @@ test_that("we can simulate from yaxcatpeople", {
   expect_equal(nrow(d), 10)
 })
 
+test_that("we can simulate by model", {
+  # Draw five values of FUELHEAT from each of the ten models.
+  skip_on_cran()
+  pm <- popmod(SESS, YAXCATPEOPLE_PMID)
+  d <- simulate(pm, target = "FUELHEAT", nsim = 5, by_model = TRUE)
+  expect_equal(names(d), c("FUELHEAT", "model"))
+  expect_equal(nrow(d), 5 * 10)
+  expect_equal(levels(d$model), as.character(1:10))
+})
+
+test_that("simulate and joint_probability are consistent", {
+  skip_on_cran()
+  pm <- popmod(SESS, YAXCATPEOPLE_PMID)
+  d <- simulate(pm, target = "FUELHEAT", nsim = 10000, seed = 17)
+  p <- joint_probability(pm, target = data.frame(FUELHEAT = c("3", "4")))
+  simulated_p <- c(mean(d$FUELHEAT == "3"), mean(d$FUELHEAT == "4"))
+  expect_equal(p, simulated_p, tolerance = 3e-2)
+
+  lp <- joint_probability(pm, target = data.frame(FUELHEAT = c("3", "4")),
+                          log = TRUE)
+  expect_equal(lp, log(p), tolerance = 1e-10)
+})
+
 test_that("we can compute column association on yaxcatpeople", {
   skip_on_cran()
   pm <- popmod(SESS, YAXCATPEOPLE_PMID)
@@ -89,9 +120,10 @@ test_that("conditional R^2 is reasonable", {
   # Check that an indicator for race being white is informative about an
   # indicator for race being black, but after conditioning on RACE=1 (white),
   # it is much less so.
-  r2_uncond <- col_assoc(pm, c("RACWHT", "RACBLK"), statistic = "R squared")
+  r2_uncond <- col_assoc(pm, c("RACWHT", "RACBLK"), statistic = "R squared",
+                         seed = 17)
   r2_cond <- col_assoc(pm, c("RACWHT", "RACBLK"), given = list(RACE = "1"),
-                       statistic = "R squared")
+                       statistic = "R squared", seed = 17)
   expect_gt(r2_uncond["RACWHT", "RACBLK"], 2 * r2_cond["RACWHT", "RACBLK"])
 })
 
@@ -136,8 +168,8 @@ test_that("predictions work as expected", {
 
   test_that("populations and models can be created", {
     skip_on_cran()
-    # Create a population with one column and three rows.
-    d <- data.frame(x = c(-1, 2, 17))
+    # Create a population with two columns and three rows.
+    d <- data.frame(x = c(-1, 2, 17), y = ordered(c("A", "B", "A")))
     name <- sprintf("test_session_%d", round(runif(1, 0, 1000000)))
     pop <<- create_population(SESS, d, name)
     # Check that the population can be fetched by id.
@@ -145,8 +177,8 @@ test_that("predictions work as expected", {
     expect_equal(pop2$name, name)
     # Kick off the builds for two population models.
     pm_name <- paste(name, "_model", sep = "")
-    pm1 <<- build_popmod(pop, pm_name, iterations = 2)
-    pm2 <<- build_popmod(pop, pm_name, iterations = 2)
+    pm1 <<- build_popmod(pop, pm_name, iterations = 2, builder = "lazy")
+    pm2 <<- build_popmod(pop, pm_name, iterations = 2, builder = "lazy")
     expect_equal(pm1$parent_id, as.character(pop))
   })
 
@@ -165,6 +197,13 @@ test_that("predictions work as expected", {
     pm2 <- wait_for(pm2, quiet = TRUE)
     expect_length(simulate(pm2, target = "x", nsim = 10)$x, 10)
     expect_equal(pm2$build_status, "built")
+  })
+
+  test_that("we can select from ordered categorical columns", {
+    skip_on_cran()
+    d <- select(pm1, target = "y")
+    # Ignore attributes like `stat_type`.
+    expect_equivalent(ordered(c("A", "B", "A")), d$y)
   })
 
   test_that("visibility can be queried and changed", {

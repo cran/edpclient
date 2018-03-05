@@ -1,11 +1,10 @@
 \name{simulate.edp_population_model}
 \alias{simulate.edp_population_model}
-\title{Fetch columns from a population model}
-\description{Fetch specified columns from a population model. This is the data
-the population model is trained on.}
+\title{Sample from a population model}
+\description{Draw a sample from a population model.}
 \usage{
 \method{simulate}{edp_population_model}(object, nsim = 1, seed = NULL, ...,
-         target = NULL, columns = NULL, given = NULL)
+         target = NULL, columns = NULL, given = NULL, by_model = FALSE)
 }
 \arguments{
   \item{object}{an EDP population model, from \code{popmod(...)}}
@@ -18,7 +17,12 @@ the population model is trained on.}
   \item{given}{a single-row data frame of values to condition on;
       \code{data.frame(a = 3)} means to simulate from the conditional
       distribution given \code{a} is 3.}
+  \item{by_model}{If false (the default), draws a sample of size \code{nsim}.
+      If true, draws a sample of size \code{nsim} from each sub-model in the
+      underlying model ensemble.}
 }
 \value{
-  a data frame with the columns specified in \code{target}.
+  A data frame with the columns specified in \code{target}. If \code{by_model}
+  is true, the result contains an additional column, "model," specifying which
+  sub-model that row came from.
 }

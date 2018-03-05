@@ -41,3 +41,15 @@ test_that("stat type manipulations work", {
   stat_type(d$a) <- "realAdditive"
   expect_equal(stat_type(d$a), "realAdditive")
 })
+
+test_that("precision manipulations work", {
+  d <- data.frame(a = c(1, 2))
+  expect_null(precision(d$a))
+  precision(d$a) <- c(1, 4)
+  expect_error(precision(d$a) <- c(2, 8))
+  expect_error(precision(d$a) <- c("1", "2"))
+  expect_error(precision(d$a) <- c(1, 2, 1))
+  expect_equal(precision(d$a), c(1, 4))
+  precision(d$a) <- NULL
+  expect_null(precision(d$a))
+})

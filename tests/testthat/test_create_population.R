@@ -1,8 +1,6 @@
 # Check `data_frame_to_json`, the main function used by `create_population`,
 # without actually calling `create_population`.
 
-library("edpclient")
-
 test_that("ids can be extracted from URLs",  {
   url <- paste("https://betaplatform.empirical.com/rpc/population_model/",
                "pm-b4my56cirthgwaze", sep = "")
@@ -29,7 +27,8 @@ test_that("numeric columns are in POST data and schema", {
   d <- data.frame(x = c(1, 2, NA))
   expected_data <- list(num_rows = 3, columns = list(x = list(1, 2, NA)))
   expected_schema <- list(columns = list(list(name = "x",
-                                              stat_type = "realAdditive")))
+                                              stat_type = "realAdditive",
+                                              precision = c(1, 1))))
   post_data <- edpclient:::data_frame_to_json(d)
   expect_equal(expected_data, post_data[["data"]])
   expect_equal(expected_schema, post_data[["schema"]])
@@ -47,6 +46,17 @@ test_that("categorical columns are in POST data and schema", {
   expect_equal(expected_schema, post_data[["schema"]])
 })
 
+test_that("ordered categorical columns are in POST data and schema", {
+  d <- data.frame(x = ordered(c("X", "Y", "X")))
+  expected_data <- list(num_rows = 3, columns = list(x = list("X", "Y", "X")))
+  expected_schema <- list(columns = list(
+      list(name = "x", stat_type = "orderedCategorical",
+           values = list(list(value = "X"), list(value = "Y")))))
+  post_data <- edpclient:::data_frame_to_json(d)
+  expect_equal(expected_data, post_data[["data"]])
+  expect_equal(expected_schema, post_data[["schema"]])
+})
+
 test_that("logical columns are in POST data and schema", {
   d <- data.frame(x = c(TRUE, FALSE, NA))
   expected_data <- list(num_rows = 3,
@@ -55,6 +65,16 @@ test_that("logical columns are in POST data and schema", {
   expected_schema <- list(columns = list(
       list(name = "x", stat_type = "categorical",
            values = list(list(value = "FALSE"), list(value = "TRUE")))))
+  post_data <- edpclient:::data_frame_to_json(d)
+  expect_equal(expected_data, post_data[["data"]])
+  expect_equal(expected_schema, post_data[["schema"]])
+})
+
+test_that("dates are in POST data and schema", {
+  d <- data.frame(
+      x = as.POSIXlt(c("1970-01-01 UTC", "1969-12-31 UTC", "1971-01-01 UTC")))
+  expected_data <- list(num_rows = 3, columns = list(x = list(0, -1, 365)))
+  expected_schema <- list(columns = list(list(name = "x", stat_type = "date")))
   post_data <- edpclient:::data_frame_to_json(d)
   expect_equal(expected_data, post_data[["data"]])
   expect_equal(expected_schema, post_data[["schema"]])
@@ -77,12 +97,14 @@ test_that("unmodeled columns are in POST data and schema", {
   expect_equal(expected_schema, post_data[["schema"]])
 })
 
-test_that("display names are in POST schema", {
-  d <- data.frame(x = c(1, 2))
+test_that("display names and descriptions are in POST schema", {
+  d <- data.frame(x = c(1, 2.5))
   display_name(d$x) <- "XX"
+  attr(d$x, "description") <- "X x"
   expected_schema <- list(columns = list(list(name = "x",
                                               stat_type = "realAdditive",
-                                              display_name = "XX")))
+                                              display_name = "XX",
+                                              description = "X x")))
   post_data <- edpclient:::data_frame_to_json(d)
   expect_equal(expected_schema, post_data[["schema"]])
 })

@@ -4,7 +4,8 @@ population <- function(sess, pid) {
 
   op <- paste("rpc/population", URLencode(pid), sep = "/")
   resp <- httr::content(edp_get(sess, op))
-  x <- list(sess = sess, name = resp$name, pid = pid, models = resp$models)
+  x <- list(sess = sess, name = resp$name, pid = pid, models = resp$models,
+            schema = schema_json(sess, pid))
   class(x) <- "edp_population"
 
   return(x)
@@ -21,6 +22,10 @@ as.character.edp_population <- function(x, ...) {
 print.edp_population <- function(x, ...) {
   cat(sprintf("population(id=%s, name=%s, #models=%d)\n", x$pid, x$name,
               length(x$models)))
+}
+
+names.edp_population <- function(x, ...) {
+  vapply(x$schema$columns, function(c) c$name, "")
 }
 
 # Exported; see ?edpclient::popmods.
@@ -54,6 +59,30 @@ select <- function(x, target = NULL, where = NULL, rowids = NULL) {
 
 select.edp_population <- function(x, target = NULL, where = NULL,
                                   rowids = NULL) {
-  stopifnot(is.population(x))
-  select(latest_popmod(x), target = target, where = where, rowids = rowids)
+  op <- paste("rpc/population", utils::URLencode(x$pid), "select", sep = "/")
+  if (is.null(target)) {
+    target <- Filter(function(n) !(n %in% names(where)), names(x))
+  }
+  if (!all(target %in% names(x))) {
+    stop("Not all target columns are in population")
+  }
+  if (!all(names(where) %in% names(x))) {
+    stop("Not all where columns are in population")
+  }
+  if (!is.null(rowids) && !is.numeric(rowids)) {
+    stop("Invalid rowids.")
+  }
+  if (!is.null(rowids) && !is.null(where)) {
+    stop("At most one of `rowids` and `where` may be set.")
+  }
+  # TODO(madeleine): Check that the where values are the right type?
+  req <- list(target = as.list(target))
+  if (!is.null(where)) {
+    req[["where"]] <- where
+  }
+  if (!is.null(rowids)) {
+    req[["rowids"]] <- rowids
+  }
+  resp <- httr::content(edp_post(x$sess, op, req))
+  return(result_set_to_data_frame(resp, target, x$schema))
 }

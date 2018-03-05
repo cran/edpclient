@@ -3,7 +3,7 @@
 \title{Create a new population model}
 \description{Ask the job server to start working on a model for a population.}
 \usage{
-build_popmod(pop, name, models = 16, builder = "crosscat", iterations = 10)
+build_popmod(pop, name, models = 16, builder = "lazy", iterations = 10)
 }
 \arguments{
   \item{pop}{a population from \code{\link{population}} or
@@ -19,5 +19,6 @@ build_popmod(pop, name, models = 16, builder = "crosscat", iterations = 10)
   see whether the model is built yet with \code{\link{popmods}}.
 }
 \seealso{
-  \code{\link{create_population}}
+  \code{\link{create_population}},
+  \code{\link{wait_for}}
 }

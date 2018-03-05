@@ -1,0 +1,10 @@
+test_that("we can create a population with dates and select the dates", {
+  skip_on_cran()
+  df_orig <- data.frame(dates = as.POSIXlt(c("1950-05-03", "2018-01-15")))
+  name <- sprintf("test_date_populations_%d", round(runif(1, 0, 1000000)))
+  pop <- create_population(SESS, df_orig, name)
+  pm <- wait_for(build_popmod(pop, "pm"))
+  df_selected <- select(pm, target = "dates")
+  expect_equivalent(df_orig, df_selected)
+  delete_population(pop)
+})
