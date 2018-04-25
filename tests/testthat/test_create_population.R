@@ -7,7 +7,7 @@ test_that("ids can be extracted from URLs",  {
   expect_equal(edpclient:::id_from_url(url, "pm-"), "pm-b4my56cirthgwaze")
   expect_error(edpclient:::id_from_url(url, "p-"), "does not start with 'p-'")
   expect_error(edpclient:::id_from_url("arglebargle", "pm-"),
-               "does not look like a URL")
+               "does not look like an URL")
 })
 
 test_that("numeric stat types are guessed", {
@@ -72,7 +72,8 @@ test_that("logical columns are in POST data and schema", {
 
 test_that("dates are in POST data and schema", {
   d <- data.frame(
-      x = as.POSIXlt(c("1970-01-01 UTC", "1969-12-31 UTC", "1971-01-01 UTC")))
+      x = as.POSIXlt(c("1970-01-01 UTC", "1969-12-31 UTC", "1971-01-01 UTC"),
+                     tz = "UTC"))
   expected_data <- list(num_rows = 3, columns = list(x = list(0, -1, 365)))
   expected_schema <- list(columns = list(list(name = "x", stat_type = "date")))
   post_data <- edpclient:::data_frame_to_json(d)

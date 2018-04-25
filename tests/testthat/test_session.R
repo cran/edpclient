@@ -163,47 +163,47 @@ test_that("predictions work as expected", {
 (function() {
 
   pop <- NULL
-  pm1 <- NULL
-  pm2 <- NULL
+  pm <- NULL
+
+  x <- rep(c(-1, 2, 17), times = 10)
+  y <- ordered(rep(c("A", "B", "A"), times = 10))
 
   test_that("populations and models can be created", {
     skip_on_cran()
     # Create a population with two columns and three rows.
-    d <- data.frame(x = c(-1, 2, 17), y = ordered(c("A", "B", "A")))
+    d <- data.frame(x = x, y = y)
     name <- sprintf("test_session_%d", round(runif(1, 0, 1000000)))
     pop <<- create_population(SESS, d, name)
     # Check that the population can be fetched by id.
     pop2 <- population(SESS, as.character(pop))
     expect_equal(pop2$name, name)
-    # Kick off the builds for two population models.
-    pm_name <- paste(name, "_model", sep = "")
-    pm1 <<- build_popmod(pop, pm_name, iterations = 2, builder = "lazy")
-    pm2 <<- build_popmod(pop, pm_name, iterations = 2, builder = "lazy")
-    expect_equal(pm1$parent_id, as.character(pop))
-  })
-
-  test_that("we can wait for populations to build", {
-    skip_on_cran()
-    if (is.null(pm1) || is.null(pm2)) {
-      skip("population models not created, skipping")
-    }
-    # The build may or may not have started when we queried for its status.
-    expect_true(pm1$build_status %in% c("unbuilt", "in_progress", "built"))
-    # Wait for the first population model, smoke-testing the progress bar.
-    pm1 <- wait_for(pm1)
-    expect_equal(pm1$build_status, "built")
-    # Wait for the second population model quietly and confirm we can simulate
-    # from it.
-    pm2 <- wait_for(pm2, quiet = TRUE)
-    expect_length(simulate(pm2, target = "x", nsim = 10)$x, 10)
-    expect_equal(pm2$build_status, "built")
+    # Build a population model.
+    pm <<- build_popmod(pop, seed = 17)
+    expect_equal(pm$parent_id, as.character(pop))
   })
 
   test_that("we can select from ordered categorical columns", {
     skip_on_cran()
-    d <- select(pm1, target = "y")
+    d <- select(pm, target = "y")
     # Ignore attributes like `stat_type`.
-    expect_equivalent(ordered(c("A", "B", "A")), d$y)
+    expect_equivalent(y, d$y)
+  })
+
+  test_that("we can query for probability-zero events", {
+    skip_on_cran()
+    lp <- joint_probability(pm, target = data.frame(x = 1e+90), log = TRUE)
+    expect_equal(-Inf, lp)
+  })
+
+  test_that("we can query for conditional probabilities", {
+    skip_on_cran()
+    p <- joint_probability(pm, target = data.frame(y = c("A", "A")),
+                            given = data.frame(x = c(1.0, 20.0)))
+    expect_length(p, 2)
+    # When `x` is large, `y` is always "A" in the data, but not when `x` is
+    # small.
+    expect_lt(p[1], p[2])
+    expect_lt(p[2], 1.0)
   })
 
   test_that("visibility can be queried and changed", {
@@ -213,10 +213,10 @@ test_that("predictions work as expected", {
                             reader_domains = character(0),
                             readers = character(0))
     expect_equal(locked_down_viz, visibility(pop))
-    expect_equal(locked_down_viz, visibility(pm1))
+    expect_equal(locked_down_viz, visibility(pm))
     # Add readers to the population and a population model.
     add_reader(pop, "test1@empirical.com")
-    add_reader(pm1, "test2@empirical.com")
+    add_reader(pm, "test2@empirical.com")
     add_reader(pop, reader_domain = "test.empirical.com")
     # Check that the population is visible to everyone added, including by way
     # of the population model.
@@ -225,7 +225,7 @@ test_that("predictions work as expected", {
         reader_domains = "test.empirical.com",
         readers = c("test1@empirical.com", "test2@empirical.com"))
     expect_equal(visible_viz, visibility(pop))
-    expect_equal(visible_viz, visibility(pm1))
+    expect_equal(visible_viz, visibility(pm))
   })
 
   test_that("the population can be deleted", {

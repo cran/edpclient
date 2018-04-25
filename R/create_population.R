@@ -1,8 +1,8 @@
 # Map an EDP resource URL to its id. See test_id_from_url for examples.
 id_from_url <- function(url, expected_prefix) {
   parts <- strsplit(url, "/")[[1]]
-  if (parts[[1]] != "https:") {
-    stop("'", url, "' does not look like a URL")
+  if (!grepl("https?:", parts[[1]])) {
+    stop("'", url, "' does not look like an URL")
   }
   id <- parts[length(parts)]
   if (!startsWith(id, expected_prefix)) {
@@ -50,17 +50,17 @@ data_frame_to_json <- function(data) {
         isTRUE(stat_type(data[[name]]) == "void")) {
       schema_column[["stat_type"]] <- "void"
       values <- as.list(as.character(data[[name]]))
-    } else if (methods::is(data[[name]], "POSIXt")) {
+    } else if (methods::is(data[[name]], "POSIXt") ||
+               methods::is(data[[name]], "Date")) {
       lt <- as.POSIXlt(data[[name]])
       if (any(lt$sec != 0 | lt$min != 0 | lt$hour != 0)) {
-        # Values specified to greater than day precision. We can't model these
-        # yet.
-        schema_column[["stat_type"]] <- "void"
-        values <- as.list(as.character(data[[name]]))
+        # Values specified to greater than day precision.
+        schema_column[["stat_type"]] <- "time"
+        secs <- as.POSIXct(data[[name]], origin = "1970-01-01", tz = "UTC")
+        values <- as.list(as.integer(secs))
       } else {
         schema_column[["stat_type"]] <- "date"
-        epoch <- as.POSIXlt("1970-01-01 UTC")
-        days <- difftime(data[[name]], epoch, units = "days")
+        days <- as.Date(data[[name]], origin = "1970-01-01", tz = "UTC")
         values <- as.list(as.integer(days))
       }
     } else if (is.numeric(data[[name]])) {
@@ -122,9 +122,13 @@ create_population <- function(sess, data, name) {
   stopifnot(is.data.frame(data))
   stopifnot(is.character(name) && !is.na(name[1]) && length(name) == 1)
   post_data <- data_frame_to_json(data)
-  resp <- edp_post(sess, "rpc/population",
-                   list(name = name, data = post_data[["data"]],
-                        schema = post_data[["schema"]]))
+  req <- list(name = name, data = post_data[["data"]],
+              schema = post_data[["schema"]])
+  if (!is.null(getOption(
+      "edp_this_is_a_lot_of_data_but_i_know_what_im_doing"))) {
+    req[["this_is_a_lot_of_data_but_i_know_what_im_doing"]] <- TRUE
+  }
+  resp <- edp_post(sess, "rpc/population", req)
   pid <- id_from_url(httr::headers(resp)$location, "p-")
   return(population(sess, pid))
 }

@@ -3,7 +3,7 @@
 # select and simulate.
 
 ALL_STAT_TYPES <- c("void", "realAdditive", "realMultiplicative", "magnitude",
-                    "categorical", "orderedCategorical", "date")
+                    "categorical", "orderedCategorical", "date", "time")
 
 identifying <- function(col) {
   isTRUE(attr(col, "identifying"))

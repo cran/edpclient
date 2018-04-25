@@ -29,9 +29,10 @@ schema_json <- function(sess, pid) {
               sep = "/")
   schema <- try(httr::content(edp_get(sess, op)), silent = TRUE)
   if (class(schema) == "try-error") {
-    stop(sprintf("Could not load schema for population '%s'.", pid))
+    stop(sprintf("Could not load schema for population '%s'. [%s]", pid,
+                 toString(schema, width = 60)))
   }
-  schema
+  return(schema)
 }
 
 # Exported; see ?edpclient::popmod.
@@ -121,10 +122,11 @@ result_set_to_data_frame <- function(rs, target, schema) {
                                   ordered = (st == "orderedCategorical"))
     } else if (st == "date") {
       days <- unlist_with_na(rs$columns[[col_name]], "integer")
-      # Round because we can't get exactly the right difftime due to DST.
-      table[[col_name]] <- round.POSIXt(
-          as.POSIXlt("1970-01-01 UTC") + as.difftime(days, units = "days"),
-          units = "days")
+      table[[col_name]] <- as.Date(days, origin = "1970-01-01", tz = "UTC")
+    } else if (st == "time") {
+      secs <- unlist_with_na(rs$columns[[col_name]], "integer")
+      table[[col_name]] <- as.POSIXct(secs, origin = "1970-01-01",
+                                      tz = "UTC")
     } else if (st == "void") {
       table[[col_name]] <- unlist_with_na(rs$columns[[col_name]], "character")
     } else {
@@ -242,13 +244,22 @@ predict.edp_population_model <- function(object, ...,
   return(result_set_to_data_frame(resp, target, pm$schema))
 }
 
-joint_probability <- function(pm, target, log = FALSE) {
+joint_probability <- function(pm, target, given = NULL, log = FALSE) {
   stopifnot(is.popmod(pm))
   stopifnot(is.data.frame(target))
   op <- paste("rpc/population_model", utils::URLencode(pm$id), "logpdf_rows",
               sep = "/")
-  resp <- edp_post(pm$sess, op, list(targets = target))
-  lp <- as.numeric(httr::content(resp))
+  req <- list(targets = target)
+  if (!is.null(given)) {
+    stopifnot(is.data.frame(given))
+    if (!all(names(given) %in% modeled_names(pm))) {
+      stop("All names in `given` must be in the population model.")
+    }
+    req$givens <- given
+  }
+  resp <- edp_post(pm$sess, op, req)
+  lp <- unlist_with_na(httr::content(resp), "numeric")
+  lp[is.na(lp)] <- -Inf
   if (log) {
     return(lp)
   } else {
@@ -324,100 +335,17 @@ col_assoc <- function(
   return(a)
 }
 
-build_popmod <- function(pop, name, models = 16, builder = "lazy",
-                         iterations = 10) {
+build_popmod <- function(pop, models = 16, seed = NULL) {
   stopifnot(is.population(pop))
-  stopifnot(is.character(name) && !is.na(name[1]) && length(name) == 1)
+  stopifnot(is.null(seed) || (length(seed) == 1 && round(seed) == seed))
   url <- paste("rpc/population", utils::URLencode(pop$pid), "build", sep = "/")
-  req <- list(name = name,
-              build_def = list(num_models = models, builder = builder,
-                               duration = list(iterations = iterations)))
+  req <- list(name = paste(pop$name, "(model)"),
+              build_def = list(num_models = models, builder = "lazy",
+                               duration = list(iterations = 1)))
+  if (!is.null(seed)) {
+    req$build_def$random_seed <- seed
+  }
   resp <- edp_post(pop$sess, url, req)
   pmid <- id_from_url(httr::headers(resp)$location, "pm-")
-  popmod(pop$sess, pmid)
-}
-
-# Returns the build progress for the population model `pm`. See
-# the /definitions/build_progress object in edp.schema.json.
-build_progress <- function(pm) {
-  op <- paste("rpc/population_model", utils::URLencode(pm$id), sep = "/")
-  return(httr::content(edp_get(pm$sess, op))$build_progress)
-}
-
-# Waits until `pm` is built (or failed to build) using the server-side wait
-# endpoint, timing out after `seconds` seconds.
-wait_quietly <- function(pm, seconds) {
-  start_secs <- unclass(Sys.time())
-  remaining <- seconds
-  while (remaining > 0) {
-    op <- paste("rpc/population_model", utils::URLencode(pm$id), "wait",
-                sep = "/")
-    req <- list(seconds = min(600, remaining))
-    prog <- httr::content(edp_post(pm$sess, op, req))
-    if (!(prog$status %in% c("unbuilt", "in_progress"))) {
-      break
-    }
-    remaining <- start_secs + seconds - unclass(Sys.time())
-  }
-  pm$build_status <- prog$status
-  return(pm)
-}
-
-# Waits until `pm` is built (or failed to build) while updating a progress bar.
-wait_noisily <- function(pm) {
-  poll_secs <- 2
-  not_started_message_printed <- FALSE
-  # This outer loop either exits immediately or prints a message saying that
-  # we're waiting for the build to start, then waits until it starts.
-  while (TRUE) {
-    prog <- build_progress(pm)
-    if (prog$status %in%
-        c("inconsistent", "built", "canceled", "cancel_requested", "failed")) {
-      pm$build_status <- prog$status
-      message(paste(pm$sess$edp_url, "explorer", "explain",
-              utils::URLencode(pm$id), sep = "/"))
-      return(pm)
-    } else if (prog$status == "unbuilt") {
-      if (!not_started_message_printed) {
-        cat("waiting for build to start...")
-        not_started_message_printed <- TRUE
-      }
-      Sys.sleep(poll_secs)
-    } else if (prog$status == "in_progress") {
-      # This inner loop creates a progress bar and updates it every few
-      # seconds, exiting when the build is no longer in progress for any
-      # reason.
-      if (not_started_message_printed) {
-        cat("build started\n")
-      }
-      stopifnot(0 <= prog$fraction_done && prog$fraction_done <= 1.0)
-      pb <- utils::txtProgressBar(min = 0, max = 1,
-                                  initial = prog$fraction_done, style = 3)
-      tryCatch({
-        while (prog$status == "in_progress") {
-          utils::setTxtProgressBar(pb, prog$fraction_done)
-          Sys.sleep(poll_secs)
-          prog <- build_progress(pm)
-        }
-      }
-      , finally = close(pb))
-      # The build is no longer in progress. Drop out to the outer loop, which
-      # will exit the next time through.
-    } else {
-      stop("unknown build status: ", prog$status)
-    }
-  }
-}
-
-wait_for <- function(pm, quiet = FALSE, seconds = Inf) {
-  stopifnot(is.popmod(pm))
-  if (quiet) {
-    pm <- wait_quietly(pm, seconds)
-  } else {
-    if (seconds != Inf) {
-      stop("`seconds` is not compatible with `quiet = FALSE`.")
-    }
-    pm <- wait_noisily(pm)
-  }
-  return(pm)
+  return(popmod(pop$sess, pmid))
 }
